@@ -77,24 +77,26 @@ class WeChatSubWnd(BaseUISubWnd):
         return self._chat_api.get_info()
     
     def send_msg(
-            self, 
+            self,
             msg: str,
             who: str=None,
-            clear: bool=True, 
+            clear: bool=True,
             at: Union[str, List[str]]=None,
             exact: bool=False,
         ) -> WxResponse:
+        self._show()
         chatbox = self._get_chatbox(who, exact)
         if chatbox is None:
             return WxResponse.failure(f"未找到聊天窗口：{who}")
         return chatbox.send_msg(msg, clear, at)
-    
+
     def send_files(
-            self, 
-            filepath, 
-            who=None, 
+            self,
+            filepath,
+            who=None,
             exact=False
         ) -> WxResponse:
+        self._show()
         chatbox = self._get_chatbox(who, exact)
         if chatbox is None:
             return WxResponse.failure(f"未找到聊天窗口：{who}")
@@ -180,10 +182,11 @@ class WeChatMainWnd(WeChatSubWnd):
                 return os.path.join(wxdir, d)
 
     def _get_chatbox(
-            self, 
-            nickname: str=None, 
+            self,
+            nickname: str=None,
             exact: bool=False
         ) -> ChatBox:
+        self._show()
         if nickname and (chatbox := WeChatSubWnd(nickname, self, timeout=0)).control:
             return chatbox._chat_api
         else:
@@ -195,12 +198,13 @@ class WeChatMainWnd(WeChatSubWnd):
                 return self._chat_api
 
     def switch_chat(
-            self, 
-            keywords: str, 
+            self,
+            keywords: str,
             exact: bool = True,
             force: bool = False,
             force_wait: Union[float, int] = 0.5
         ):
+        self._show()
         return self._session_api.switch_chat(keywords, exact, force, force_wait)
         
     def get_all_sub_wnds(self):
@@ -221,6 +225,7 @@ class WeChatMainWnd(WeChatSubWnd):
                 return subwin
             
     def open_separate_window(self, keywords: str) -> WeChatSubWnd:
+        self._show()
         if subwin := self.get_sub_wnd(keywords):
             wxlog.debug(f"{keywords} 获取到已存在的子窗口: {subwin}")
             return subwin

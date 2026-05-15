@@ -27,7 +27,6 @@ class SessionBox:
         self.searchbox = self.control.GroupControl(ClassName="mmui::XSearchField").EditControl()
         self.session_list = self.control.GroupControl(ClassName="mmui::ChatSessionList").\
             ListControl(ClassName="mmui::XTableView", Name="会话")
-        self.search_content = self.parent.control.WindowControl(ClassName="mmui::SearchContentPopover")
         
     def roll_up(self, n: int=5):
         self.control.MiddleClick()
@@ -43,27 +42,76 @@ class SessionBox:
         else:
             return []
 
+    def _get_search_content(self, timeout=3):
+        """动态获取搜索结果弹窗控件，避免缓存陈旧引用"""
+        t0 = time.time()
+        while time.time() - t0 < timeout:
+            search_content = self.parent.control.WindowControl(ClassName="mmui::SearchContentPopover")
+            if search_content.Exists(0.5):
+                list_ctrl = search_content.ListControl()
+                if list_ctrl.Exists(0.5):
+                    return search_content, list_ctrl
+            time.sleep(0.2)
+        return None, None
+
+    def _clear_search(self):
+        """清除搜索框内容并关闭搜索弹窗"""
+        try:
+            # 先按 Esc 关闭可能残留的搜索弹窗
+            search_content = self.parent.control.WindowControl(ClassName="mmui::SearchContentPopover")
+            if search_content.Exists(0):
+                self.searchbox.SendKeys('{Esc}')
+                time.sleep(0.2)
+            # 点击搜索框获取焦点
+            self.searchbox.Click()
+            time.sleep(0.1)
+            # 选中全部并删除
+            self.searchbox.SendKeys('{Ctrl}a', waitTime=0)
+            self.searchbox.SendKeys('{DELETE}')
+            time.sleep(0.1)
+        except Exception:
+            pass
+
     def search(
-            self, 
+            self,
             keywords: str,
             force: bool = False,
             force_wait: Union[float, int] = 0.5
         ):
-        self.searchbox.RightClick()
+        wxlog.debug(f"搜索会话: {keywords}")
+        # 确保主窗口在前台
+        self.root._show()
+        # 清除之前的搜索内容
+        self._clear_search()
+        time.sleep(0.3)
+
+        # 点击搜索框获取焦点并粘贴关键字
+        self.searchbox.Click()
+        time.sleep(0.1)
         SetClipboardText(keywords)
-        menu = Menu(self)
-        menu.select('粘贴')
+        self.searchbox.SendKeys('{Ctrl}v')
+        time.sleep(0.1)
         self.searchbox.MiddleClick()
 
-        search_result = self.search_content.ListControl()
+        # 等待搜索结果弹窗出现
+        search_content, search_result_list = self._get_search_content(timeout=WxParam.SEARCH_CHAT_TIMEOUT)
+        if not search_content or not search_result_list:
+            wxlog.debug(f"搜索结果弹窗未出现: {keywords}")
+            return []
 
         if force:
             time.sleep(force_wait)
-            # self.searchbox.SendKeys('{ENTER}')
-            # return ''
 
-        return [SearchResultElement(i) for i in search_result.GetChildren()]
+        return [SearchResultElement(i) for i in search_result_list.GetChildren()]
     
+    def _dismiss_search(self):
+        """关闭搜索结果弹窗（点击搜索结果后调用）"""
+        try:
+            self.searchbox.SendKeys('{Esc}')
+            time.sleep(0.1)
+        except Exception:
+            pass
+
     def switch_chat(
         self,
         keywords: str, 
@@ -72,37 +120,67 @@ class SessionBox:
         force_wait: Union[float, int] = 0.5
     ):
         wxlog.debug(f"切换聊天窗口: {keywords}, {exact}, {force}, {force_wait}")
-        search_box = self.search_content.ListControl()
+        # 执行搜索
         search_result = self.search(keywords, force, force_wait)
+
+        # 如果force模式，搜索后直接回车
+        if force and not search_result:
+            time.sleep(force_wait)
+            self.searchbox.SendKeys('{ENTER}')
+            self._dismiss_search()
+            return keywords
+
+        # 等待搜索结果加载并匹配
         t0 = time.time()
-        while time.time() -t0 < WxParam.SEARCH_CHAT_TIMEOUT:
-            results = []
+        while time.time() - t0 < WxParam.SEARCH_CHAT_TIMEOUT:
+            # 动态获取搜索结果弹窗
+            search_content, search_box = self._get_search_content(timeout=1)
+            if not search_box:
+                time.sleep(0.3)
+                continue
+
             search_result_items = search_box.GetChildren()
+            if not search_result_items:
+                time.sleep(0.3)
+                continue
+
             for search_result_item in search_result_items:
                 text: str = search_result_item.Name
                 if exact:
                     if text == keywords:
                         search_result_item.Click()
+                        time.sleep(0.3)
+                        self._dismiss_search()
                         return keywords
                     elif (
                         ' 微信号: ' in text
                         and (split:=text.split(' 微信号: '))[-1].lower() == keywords.lower()
                     ):
                         search_result_item.Click()
+                        time.sleep(0.3)
+                        self._dismiss_search()
                         return split[0]
                     elif (
                         ' 昵称: ' in text
                         and (split:=text.split(' 昵称: '))[-1].lower() == keywords.lower()
                     ):
                         search_result_item.Click()
+                        time.sleep(0.3)
+                        self._dismiss_search()
                         return split[0]
                 else:
                     if keywords in text:
                         search_result_item.Click()
+                        time.sleep(0.3)
+                        self._dismiss_search()
                         return text
-                    
-        if self.search_content.Exists(0):
-            self.control.MiddleClick()
+
+            time.sleep(0.3)
+
+        # 超时未找到，清理搜索状态
+        wxlog.debug(f"切换聊天窗口超时: {keywords}")
+        self._clear_search()
+        return None
 
     def open_separate_window(self, name: str):
         wxlog.debug(f"打开独立窗口: {name}")

@@ -27,10 +27,13 @@ class BaseUIWnd(ABC):
     def _show(self):
         if not hasattr(self, 'HWND'):
             self.HWND = self.control.GetTopLevelControl().NativeWindowHandle
-        win32gui.ShowWindow(self.HWND, 1)
+        # SW_RESTORE=9: 如果窗口最小化则恢复，如果正常则激活
+        win32gui.ShowWindow(self.HWND, 9)
+        # 置顶再取消置顶，确保窗口到前台
         win32gui.SetWindowPos(self.HWND, -1, 0, 0, 0, 0, 3)
         win32gui.SetWindowPos(self.HWND, -2, 0, 0, 0, 0, 3)
-        self.control.Show()
+        win32gui.SetForegroundWindow(self.HWND)
+        time.sleep(0.1)
 
     @property
     def pid(self):

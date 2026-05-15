@@ -30,7 +30,7 @@ class WxParam:
     LISTENER_EXCUTOR_WORKERS: int = 4
 
     # 搜索聊天对象超时时间，单位秒
-    SEARCH_CHAT_TIMEOUT: int = 2
+    SEARCH_CHAT_TIMEOUT: int = 5
 
     # 微信笔记加载超时时间，单位秒
     NOTE_LOAD_TIMEOUT: int = 30
