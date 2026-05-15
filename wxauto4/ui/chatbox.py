@@ -87,7 +87,7 @@ class ChatBox(BaseUISubWnd):
                         chat_info['chat_name'] = cnc.Name
 
                 elif aid == 'chat_count':
-                    chat_info['group_member_count'] = int(re.findall('\d+', control.Name)[0])
+                    chat_info['group_member_count'] = int(re.findall(r'\d+', control.Name)[0])
                     chat_info['chat_type'] = 'group'
                 elif aid == 'company':
                     chat_info['chat_type'] = 'service'
@@ -103,7 +103,7 @@ class ChatBox(BaseUISubWnd):
     def init(self):
         self.msgbox = self.control.GroupControl(ClassName="mmui::MessageView").ListControl()
         self.editbox = self.control.EditControl(ClassName="mmui::ChatInputField")
-        self.sendbtn = self.control.ButtonControl(Name=self._lang('发送(S)'))
+        self.sendbtn = self.control.ButtonControl(Name=self._lang('发送'))
         self.tools = self.control.ToolBarControl()
         self._empty = False
         # self._now_chat_info = self.get_info()
@@ -145,8 +145,9 @@ class ChatBox(BaseUISubWnd):
             if time.time() - t0 > 10:
                 return WxResponse.failure(f'Timeout --> {self.who} - {content}')
             self._activate_editbox()
-
+            time.sleep(0.1)
             self.sendbtn.Click()
+            time.sleep(0.1)
             if not self.editbox.GetValuePattern().Value:
                 return WxResponse.success(f"success")
             elif not self.editbox.GetValuePattern().Value.replace('￼', '').strip():
