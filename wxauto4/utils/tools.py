@@ -137,14 +137,19 @@ def detect_message_direction(
 ) -> tuple[str, float]:
     """通过截图判断消息气泡的方向。
 
+    检测策略：
+    1. 绿色检测：自己消息气泡为绿色，朋友为灰色。
+       采样中心区域，有绿色→self，无绿色但有气泡→friend。
+    2. 头像方差检测（回退）：短消息气泡太小，中心采样全是白色背景，
+       比较左上角和右上角像素方差，头像所在侧方差更高。
+
     Args:
         image_path: 消息截图路径。
-        avatar_height_ratio: 头像在截图中占据的高度比例。
-        tolerance: 像素颜色比较的容忍度。
+        avatar_height_ratio: 保留参数（兼容旧接口）。
+        tolerance: 保留参数（兼容旧接口）。
 
     Returns:
-        Tuple[str, float]: ``("left", distance)`` 或 ``("right", distance)``，
-        ``distance`` 表示从对应方向开始出现气泡的列索引，便于后续定位。
+        Tuple[str, float]: ``("left", score)`` 或 ``("right", score)``。
     """
 
     img = Image.open(image_path)
@@ -152,44 +157,53 @@ def detect_message_direction(
         img = img.convert('RGB')
     w, h = img.size
 
-    # 仅取中间 band 区域
-    band_h = int(h * avatar_height_ratio)
-    y0 = (h - band_h) // 2
-    y1 = y0 + band_h
+    # ---- 策略1：气泡颜色检测 ----
+    # 在气泡中心区域采样（避开头像、边缘阴影等干扰）
+    sample_left = w // 6
+    sample_top = h // 4
+    sample_right = w * 5 // 6
+    sample_bottom = h * 3 // 4
+    sample_region = img.crop((sample_left, sample_top, sample_right, sample_bottom))
 
-    pixels = img.load()  # 获取像素访问对象
+    green_count = 0
+    bubble_count = 0  # 非白色背景的像素（气泡像素）
+    total_count = 0
+    pixels = list(sample_region.getdata())
+    for r, g, b in pixels:
+        total_count += 1
+        # 微信绿色气泡特征：G通道显著高于R和B，且整体较亮
+        if g > 150 and g > r * 1.15 and g > b * 1.3 and r > 80:
+            green_count += 1
+            bubble_count += 1
+        # 非白色背景：即气泡区域（灰色气泡、绿色气泡、文字等）
+        elif not (r > 235 and g > 235 and b > 235):
+            bubble_count += 1
 
-    def is_uniform_column(x: int) -> bool:
-        base = pixels[x, y0]  # 以 band 顶部像素作为参考
-        for y in range(y0, y1):
-            r, g, b = pixels[x, y]
-            if (abs(r - base[0]) > tolerance or
-                abs(g - base[1]) > tolerance or
-                abs(b - base[2]) > tolerance):
-                return False
-        return True
+    green_ratio = green_count / total_count if total_count else 0
+    bubble_ratio = bubble_count / total_count if total_count else 0
 
-    # 从左边扫描
-    left_idx = math.inf
-    for x in range(w):
-        if not is_uniform_column(x):
-            left_idx = x
-            break
+    # 有绿色 → self（右）
+    if green_ratio > 0.02:
+        return 'right', green_ratio
+    # 有气泡像素但没绿色 → 灰色气泡 → friend（左）
+    if bubble_ratio > 0.05:
+        return 'left', bubble_ratio
 
-    # 从右边扫描
-    right_idx = math.inf
-    for offset, x in enumerate(range(w - 1, -1, -1)):
-        if not is_uniform_column(x):
-            right_idx = offset  # 距右边界的列数
-            break
+    # ---- 策略2：头像方差检测（小消息回退） ----
+    # bubble_ratio很低：中心采样全是白色背景，没采到气泡
+    # 比较左右上角的像素方差，头像所在侧方差更高
+    detect_height = min(60, h)
+    detect_width = max(min(60, w // 5), 20)
 
-    # print(f"left_idx: {left_idx}, right_idx: {right_idx}")
-    if left_idx == math.inf and right_idx == math.inf:
-        # 都没找到变化列，兜底
-        return 'right', math.inf
-    if left_idx <= right_idx:
-        return 'left', float(left_idx)
-    return 'right', float(right_idx)
+    left_region = img.crop((0, 0, detect_width, detect_height))
+    right_region = img.crop((w - detect_width, 0, w, detect_height))
+
+    left_var = calculate_pixel_variance(left_region)
+    right_var = calculate_pixel_variance(right_region)
+
+    if left_var > right_var:
+        return 'left', float(left_var)
+    return 'right', float(right_var)
 
 def calculate_pixel_variance(region):
     """

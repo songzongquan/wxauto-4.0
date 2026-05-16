@@ -20,6 +20,7 @@ import random
 import os
 import re
 import sys
+import time
 
 class WeChatSubWnd(BaseUISubWnd):
     _ui_cls_name: str = 'mmui::FramelessMainWindow'
@@ -136,6 +137,7 @@ class WeChatMainWnd(WeChatSubWnd):
     def __init__(self, nickname: str = None, hwnd: int = None):
         self.root = self
         self.parent = self
+        self._self_nickname = ''
         if hwnd:
             self._setup_ui(hwnd)
         else:
@@ -150,7 +152,7 @@ class WeChatMainWnd(WeChatSubWnd):
                     raise Exception(f'未找到微信窗口：{nickname}')
         # if NetErrInfoTipsBarWnd(self):
         #     raise NetWorkError('微信无法连接到网络')
-        
+
         print(f'初始化成功，获取到已登录窗口：{self.nickname}')
 
     def _setup_ui(self, hwnd: int):
@@ -158,7 +160,7 @@ class WeChatMainWnd(WeChatSubWnd):
         self.control = uia.ControlFromHandle(hwnd)
         if self.control is not None:
             navigation_control = self.control.\
-                ToolBarControl(ClassName="mmui::MainTabBar", AutomationId='main_tabbar')
+                ToolBarControl(ClassName="mmui::MainTabBar")
             sessionbox_control = self.control.\
                 GroupControl(ClassName="mmui::ChatMasterView")
             chatbox_control = self.control.\
@@ -174,11 +176,72 @@ class WeChatMainWnd(WeChatSubWnd):
 
     def _get_wx_path(self):
         return GetPathByHwnd(self.HWND)
+
+    def _detect_self_nickname(self, timeout=3):
+        """自动检测当前登录用户的昵称
+
+        通过点击主窗口导航栏上方的头像区域，读取弹出资料卡中的昵称
+        """
+        if self._self_nickname:
+            return self._self_nickname
+        try:
+            self._show()
+            # 头像在MainTabBar上方（TabBar从y=43开始，第一个tab从y=139开始）
+            # 点击TabBar顶部区域（约x=30, y=50偏移）触发头像点击
+            tabbar = self.control.ToolBarControl(ClassName="mmui::MainTabBar")
+            if not tabbar.Exists(1):
+                wxlog.debug('未找到MainTabBar')
+                return ''
+            tabbar.Click(x=30, y=50, ratioX=0, ratioY=0)
+
+            # 等待弹窗出现（弹窗是独立窗口 mmui::ProfileUniquePop）
+            nickname = ''
+            from wxauto4.utils.win32 import get_windows_by_pid
+            t0 = time.time()
+            while time.time() - t0 < timeout:
+                for hwnd in get_windows_by_pid(self.pid):
+                    try:
+                        c = uia.ControlFromHandle(hwnd)
+                        if c.ClassName == 'mmui::ProfileUniquePop':
+                            # 昵称在 AutomationId=right_v_view.nickname_button_view.display_name_text
+                            name_ctrl = c.TextControl(
+                                AutomationId='right_v_view.nickname_button_view.display_name_text'
+                            )
+                            if name_ctrl.Exists(1) and name_ctrl.Name:
+                                nickname = name_ctrl.Name
+                            # 关闭弹窗
+                            c.SendKeys('{Esc}')
+                            time.sleep(0.3)
+                            break
+                    except:
+                        pass
+                if nickname:
+                    break
+                time.sleep(0.3)
+
+            # 恢复主窗口（弹窗可能导致主窗口失焦或最小化）
+            self._show()
+
+            if not nickname:
+                wxlog.debug('自动检测昵称失败，未找到资料弹窗或昵称文本')
+                # 确保关闭可能残留的弹窗
+                self.control.SendKeys('{Esc}')
+                time.sleep(0.2)
+                self._show()
+            else:
+                self._self_nickname = nickname
+                wxlog.debug(f'自动检测到当前用户昵称: {nickname}')
+
+            return self._self_nickname
+        except Exception as e:
+            wxlog.debug(f'自动检测昵称异常: {e}')
+            self._show()
+            return ''
     
     def _get_wx_dir(self):
         wxdir = os.path.dirname(self._get_wx_path())
         for d in os.listdir(wxdir):
-            if re.match('\d+\.\d+\.\d+\.\d+', d):
+            if re.match(r'\d+\.\d+\.\d+\.\d+', d):
                 return os.path.join(wxdir, d)
 
     def _get_chatbox(

@@ -27,7 +27,7 @@ class SessionBox:
         self.searchbox = self.control.GroupControl(ClassName="mmui::XSearchField").EditControl()
         self.session_list = self.control.GroupControl(ClassName="mmui::ChatSessionList").\
             ListControl(ClassName="mmui::XTableView", Name="会话")
-        
+
     def roll_up(self, n: int=5):
         self.control.MiddleClick()
         self.control.WheelUp(wheelTimes=n)
@@ -72,6 +72,22 @@ class SessionBox:
         except Exception:
             pass
 
+    def _close_search_browser(self):
+        """关闭可能被触发的搜一搜页面，切回聊天视图"""
+        try:
+            from wxauto4.ui.navigationbox import NavigationBox
+            # 检查导航栏中搜一搜按钮是否处于选中/激活状态
+            # 如果搜一搜页面打开了，点击微信按钮切回聊天视图
+            nav_control = self.root.control.ToolBarControl(ClassName="mmui::MainTabBar")
+            if nav_control.Exists(0.5):
+                nav = NavigationBox(nav_control, self.parent)
+                # 点击"微信"按钮回到聊天视图
+                if nav.chat_icon.Exists(0.5):
+                    nav.chat_icon.Click()
+                    time.sleep(0.2)
+        except Exception:
+            pass
+
     def search(
             self,
             keywords: str,
@@ -91,7 +107,8 @@ class SessionBox:
         SetClipboardText(keywords)
         self.searchbox.SendKeys('{Ctrl}v')
         time.sleep(0.1)
-        self.searchbox.MiddleClick()
+        # 按下方向键触发搜索结果（替代MiddleClick，避免触发搜一搜）
+        self.searchbox.SendKeys('{Down}')
 
         # 等待搜索结果弹窗出现
         search_content, search_result_list = self._get_search_content(timeout=WxParam.SEARCH_CHAT_TIMEOUT)
@@ -103,7 +120,7 @@ class SessionBox:
             time.sleep(force_wait)
 
         return [SearchResultElement(i) for i in search_result_list.GetChildren()]
-    
+
     def _dismiss_search(self):
         """关闭搜索结果弹窗（点击搜索结果后调用）"""
         try:
@@ -114,7 +131,7 @@ class SessionBox:
 
     def switch_chat(
         self,
-        keywords: str, 
+        keywords: str,
         exact: bool = True,
         force: bool = False,
         force_wait: Union[float, int] = 0.5
@@ -128,6 +145,8 @@ class SessionBox:
             time.sleep(force_wait)
             self.searchbox.SendKeys('{ENTER}')
             self._dismiss_search()
+            # 检查并关闭搜一搜
+            self._close_search_browser()
             return keywords
 
         # 等待搜索结果加载并匹配
@@ -146,11 +165,17 @@ class SessionBox:
 
             for search_result_item in search_result_items:
                 text: str = search_result_item.Name
+                # 跳过搜一搜等搜索结果项
+                if '搜一搜' in text or '搜索' in text:
+                    wxlog.debug(f"跳过搜索结果项: {text}")
+                    continue
                 if exact:
                     if text == keywords:
                         search_result_item.Click()
                         time.sleep(0.3)
                         self._dismiss_search()
+                        # 检查并关闭搜一搜
+                        self._close_search_browser()
                         return keywords
                     elif (
                         ' 微信号: ' in text
@@ -159,6 +184,7 @@ class SessionBox:
                         search_result_item.Click()
                         time.sleep(0.3)
                         self._dismiss_search()
+                        self._close_search_browser()
                         return split[0]
                     elif (
                         ' 昵称: ' in text
@@ -167,12 +193,14 @@ class SessionBox:
                         search_result_item.Click()
                         time.sleep(0.3)
                         self._dismiss_search()
+                        self._close_search_browser()
                         return split[0]
                 else:
                     if keywords in text:
                         search_result_item.Click()
                         time.sleep(0.3)
                         self._dismiss_search()
+                        self._close_search_browser()
                         return text
 
             time.sleep(0.3)
@@ -180,20 +208,38 @@ class SessionBox:
         # 超时未找到，清理搜索状态
         wxlog.debug(f"切换聊天窗口超时: {keywords}")
         self._clear_search()
+        self._close_search_browser()
         return None
 
     def open_separate_window(self, name: str):
+        """在独立窗口中打开会话，优先从会话列表直接双击，避免重复搜索"""
         wxlog.debug(f"打开独立窗口: {name}")
+        # 先尝试直接从会话列表中找到目标（可能已通过switch_chat切换到该聊天）
+        time.sleep(0.3)
+        t0 = time.time()
+        while time.time() - t0 < WxParam.SEARCH_CHAT_TIMEOUT:
+            sessions = [i for i in self.get_session() if uia.IsElementInWindow(self.session_list, i.control)]
+            if sessions and sessions[0].content.startswith(name):
+                sessions[0].double_click()
+                return WxResponse.success(data={'nickname': name})
+            time.sleep(0.3)
+
+        # 会话列表中未找到，尝试搜索切换后打开
+        wxlog.debug(f"会话列表未找到 {name}，执行搜索")
         realname = self.switch_chat(name)
         if not realname:
             return WxResponse.failure('未找到会话')
         time.sleep(0.3)
-        while True:
-            session = [i for i in self.get_session() if uia.IsElementInWindow(self.session_list, i.control)][0]
-            if session.content.startswith(realname):
-                break
-        session.double_click()
-        return WxResponse.success(data={'nickname': realname})
+        t0 = time.time()
+        while time.time() - t0 < WxParam.SEARCH_CHAT_TIMEOUT:
+            sessions = [i for i in self.get_session() if uia.IsElementInWindow(self.session_list, i.control)]
+            if sessions and sessions[0].content.startswith(realname):
+                sessions[0].double_click()
+                return WxResponse.success(data={'nickname': realname})
+            time.sleep(0.3)
+        wxlog.debug(f"打开独立窗口超时: 未在会话列表中找到 {realname}")
+        self._clear_search()
+        return WxResponse.failure('未在会话列表中找到会话')
 
 
     def go_top(self):
@@ -205,12 +251,12 @@ class SessionBox:
         wxlog.debug("回到会话列表底部")
         self.control.MiddleClick()
         self.control.SendKeys('{End}')
-    
+
 class SessionElement:
     def __init__(
-            self, 
-            control: uia.Control, 
-            parent: SessionBox, 
+            self,
+            control: uia.Control,
+            parent: SessionBox,
         ):
         self.root = parent.root
         self.parent = parent
@@ -263,7 +309,7 @@ class SessionElement:
         if len(content) > 5:
             content = content[:5] + '...'
         return f"<wxauto4 Session Element({content})>"
-    
+
     def roll_into_view(self):
         uia.RollIntoView(self.control.GetParentControl(), self.control)
 
@@ -346,7 +392,7 @@ class SearchResultElement:
             line for line in str(self.content).split('\n')
             if line and line.strip()
         ]
-    
+
     def click(self):
         uia.RollIntoView(self.control.GetParentControl(), self.control)
         self.control.Click()

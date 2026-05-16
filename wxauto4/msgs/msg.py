@@ -32,7 +32,20 @@ def parse_msg_attr(
         'right': 'self'
     }
     if control.AutomationId:
-        # uia.RollIntoView(parent.msgbox, control)
+        # 截图前确保UI状态正确（头像点击可能留下残留弹窗和滚动偏移）
+        from .mattr import FriendMessage
+        root = parent.root
+        main_wnd = getattr(root, 'parent', None) or root
+        FriendMessage._dismiss_profile_popups(main_wnd.pid)
+        root._show()
+
+        # 关键：将消息滚动到可见区域
+        # 头像点击操作(_get_sender_from_avatar)会改变消息列表的滚动位置，
+        # 导致后续消息的截图位置偏移，方向检测失败。
+        # RollIntoView确保消息在视口内，使PrintWindow截取正确的内容。
+        uia.RollIntoView(parent.msgbox, control)
+        time.sleep(0.1)
+
         msg_screenshot = control.ScreenShot()
         msg_direction, msg_direction_distence = detect_message_direction(msg_screenshot)
         msg_attr = msg_direction_hash.get(msg_direction)

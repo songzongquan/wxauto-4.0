@@ -151,7 +151,8 @@ class WeChatDemo:
         messages = self.wx.GetAllMessage()
         print(f"当前聊天窗口共 {len(messages)} 条消息")
         for msg in messages:
-            print(f"[{msg.attr}] {msg.sender}: {msg.content}")
+            print([attr for attr in dir(msg) if not callable(getattr(msg, attr)) and not attr.startswith('__')])
+            print(f"[{msg.attr}] {msg.sender if hasattr(msg, 'sender') else ''}: {msg.content}")
 
     # ------------------------------------------------------------------
     # Listener related features

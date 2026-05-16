@@ -216,6 +216,9 @@ class WeChat(Chat, Listener):
         self.ChatBox = self._api._chat_api
         self.Moment = Moment(self)
         self.nickname = self._api.nickname
+        # 初始化时自动检测当前登录用户的昵称
+        self._self_nickname = self._api._detect_self_nickname() or ''
+        self._api._self_nickname = self._self_nickname
         self.listen = {}
         if start_listener:
             self._listener_start()
@@ -250,6 +253,16 @@ class WeChat(Chat, Listener):
     @property
     def dir(self):
         return self._api._get_wx_dir()
+
+    @property
+    def self_nickname(self):
+        """获取当前登录用户的昵称（初始化时自动检测）"""
+        return self._self_nickname
+
+    @self_nickname.setter
+    def self_nickname(self, value):
+        self._self_nickname = value
+        self._api._self_nickname = value
 
     def KeepRunning(self):
         """保持运行"""

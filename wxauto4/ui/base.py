@@ -32,7 +32,10 @@ class BaseUIWnd(ABC):
         # 置顶再取消置顶，确保窗口到前台
         win32gui.SetWindowPos(self.HWND, -1, 0, 0, 0, 0, 3)
         win32gui.SetWindowPos(self.HWND, -2, 0, 0, 0, 0, 3)
-        win32gui.SetForegroundWindow(self.HWND)
+        try:
+            win32gui.SetForegroundWindow(self.HWND)
+        except Exception:
+            pass
         time.sleep(0.1)
 
     @property

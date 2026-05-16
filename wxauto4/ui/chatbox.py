@@ -12,6 +12,7 @@ from wxauto4.ui.component import (
     Menu
 )
 from wxauto4.logger import wxlog
+from wxauto4.utils import uilock
 from .base import (
     BaseUISubWnd
 )
@@ -109,10 +110,11 @@ class ChatBox(BaseUISubWnd):
         # self._now_chat_info = self.get_info()
         # self.id = self.msgbox.runtimeid
         if (cid := self.id) and cid not in USED_MSG_IDS:
-            # print("init chatbox", cid)
             USED_MSG_IDS[self.id] = tuple((i.runtimeid for i in self.msgbox.GetChildren()))
             if not USED_MSG_IDS[cid]:
                 self._empty = True
+            # 同步初始化消息计数，避免首次get_new_msgs把已有消息当作新消息
+            LAST_MSG_COUNT[self.id] = len(USED_MSG_IDS[self.id])
 
     def clear_edit(self):
         self._show()
@@ -186,7 +188,8 @@ class ChatBox(BaseUISubWnd):
             self.editbox.SendKeys('@'+friend.replace(' ', ''))
             atmenu = AtMenu(self)
             atmenu.select(friend)
-        
+
+    @uilock
     def get_msgs(self):
         if self.msgbox.Exists(0):
             return [
@@ -196,7 +199,18 @@ class ChatBox(BaseUISubWnd):
             ]
         return []
 
+    @uilock
     def get_new_msgs(self):
+        if not self.msgbox.Exists(0):
+            return []
+        try:
+            return self._get_new_msgs_inner()
+        finally:
+            # 无论何种原因导致滚动偏移（程序或人为），都滚回底部
+            if self.msgbox.Exists(0):
+                self.msgbox.SendKeys('{End}')
+
+    def _get_new_msgs_inner(self):
         if not self.msgbox.Exists(0):
             return []
         msg_controls = self.msgbox.GetChildren()
